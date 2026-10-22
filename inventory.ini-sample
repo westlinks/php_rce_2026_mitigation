@@ -1,0 +1,40 @@
+# ==============================================================================
+# SAMPLE ANSIBLE INVENTORY TEMPLATE (inventory.ini)
+# ==============================================================================
+
+[test_servers]
+# Host alias                Real IP / Domain                 SSH Port
+app-dev-01                 ansible_host=192.0.2.10          ansible_port=22
+app-dev-02                 ansible_host=192.0.2.11          ansible_port=22
+
+[web_servers]
+app-web-01                 ansible_host=192.0.2.20
+app-web-02                 ansible_host=192.0.2.21
+
+[infra_servers]
+infra-console-01           ansible_host=192.0.2.30
+infra-vpn-01               ansible_host=192.0.2.31
+
+# ------------------------------------------------------------------------------
+# GROUP AGGREGATIONS
+# ------------------------------------------------------------------------------
+[production:children]
+web_servers
+infra_servers
+
+[all_managed:children]
+test_servers
+production
+
+# ------------------------------------------------------------------------------
+# GLOBAL INVENTORY VARIABLES
+# ------------------------------------------------------------------------------
+[all:vars]
+# SSH Connection Settings
+ansible_user=deploy_user
+ansible_become=yes
+ansible_become_method=sudo
+
+# Optional SSH Key and Python path overrides
+# ansible_ssh_private_key_file=~/.ssh/id_rsa
+# ansible_python_interpreter=/usr/bin/python3
