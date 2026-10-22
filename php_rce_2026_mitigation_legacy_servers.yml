@@ -63,14 +63,17 @@
       loop: "{{ ansible_facts.services.keys() | select('match', '^(php.*-fpm|php-fpm)(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
       when: item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
 
-    - name: Restart web server services (Apache / Httpd)
+    - name: Restart active web servers (Apache / Httpd / Nginx)
       service:
         name: "{{ item }}"
         state: restarted
       loop:
         - apache2
         - httpd
-      when: item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
+        - nginx
+      when: >
+        (item in ansible_facts.services and ansible_facts.services[item].state == 'running') or
+        ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state == 'running')
       ignore_errors: yes
 
     # --- VERIFICATION TASKS ---

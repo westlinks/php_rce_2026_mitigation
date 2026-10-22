@@ -50,11 +50,18 @@
       loop: "{{ ansible_facts.services.keys() | select('match', '^php.*-fpm(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
       when: item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
 
-    - name: Restart Apache service (if installed)
+    - name: Restart active web servers (Apache / Nginx)
       service:
-        name: apache2
+        name: "{{ item }}"
         state: restarted
-      when: "'apache2.service' in ansible_facts.services or 'apache2' in ansible_facts.services"
+      loop:
+        - apache2
+        - httpd
+        - nginx
+      when: >
+        (item in ansible_facts.services and ansible_facts.services[item].state == 'running') or
+        ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state == 'running')
+      ignore_errors: yes
 
     # --- VERIFICATION TASKS ---
 
@@ -81,17 +88,3 @@
     - name: Display HTTP verification results
       debug:
         msg: "{{ inventory_hostname }} ({{ ansible_host }}) -> HTTP Status: {{ http_check.stdout | default('Connection failed') }}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-

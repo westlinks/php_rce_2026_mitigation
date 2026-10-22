@@ -14,7 +14,7 @@ Designed for **supported OS environments** (Ubuntu 22.04+, Debian 12) where stan
 ### 2. Legacy Playbook (`php_rce_2026_mitigation_legacy_servers.yml`)
 Designed specifically for **EOL / Legacy OS environments** (CentOS 7, Ubuntu 20.04/14.04). Because these operating systems no longer receive upstream PHP package updates, this playbook:
 * Handles both `apt` (Debian/Ubuntu) and `yum` (CentOS/RHEL) path variations (`/etc/php.ini`, `/etc/php.d/`, `/etc/php/`).
-* Gracefully handles legacy web server service units (`httpd` vs `apache2`).
+* Gracefully handles dynamic web server service units (`apache2`, `httpd`, `nginx`).
 * Enforces strict `post_max_size = 32M` request limits to reduce OOM surfaces on unpatchable PHP builds until these hosts can be upgraded or decommissioned.
 
 ---
@@ -25,7 +25,7 @@ Both playbooks apply emergency configuration hotfixes across active PHP environm
 2. **Disables Upload Progress (`CVE-2026-109619`):** Sets `session.upload_progress.enabled = 0`.
 3. **Removes PHP Soft Memory Ceiling (`CVE-2026-109618`):** Sets `memory_limit = -1`.
 4. **Limits Request Body Sizes:** Restricts `post_max_size = 32M` to minimize OOM attack surfaces.
-5. **Smart Service Restarts:** Dynamically detects active systemd services and restarts running `php-fpm`, `apache2`, or `httpd` units.
+5. **Smart Web Server Restarts:** Dynamically detects active systemd services and restarts running `php-fpm`, `apache2`, `httpd`, or `nginx` units.
 6. **Runtime Verification:** Checks live INI settings via PHP CLI and validates HTTP availability.
 
 ---
