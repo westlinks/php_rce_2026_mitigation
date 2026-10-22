@@ -76,9 +76,10 @@ ansible-playbook -i inventory.ini php_rce_2026_mitigation_legacy_servers.yml --l
 ```text
 .
 ├── .gitignore
+├── ansible.cfg                                   # Apply local ansible settings
 ├── README.md                                     # Repository documentation
 ├── inventory.ini-sample                          # Template inventory file for Git
 ├── php_rce_2026_mitigation.yml                   # Mitigation playbook for supported OS releases
-└── php_rce_2026_mitigation_legacy_servers.yml   # Mitigation playbook for legacy/EOL OS releases
+└── php_rce_2026_mitigation_legacy_servers.yml    # Mitigation playbook for legacy/EOL OS releases
 
 ```
