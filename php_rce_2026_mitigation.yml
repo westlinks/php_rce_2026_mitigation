@@ -1,5 +1,5 @@
 ---
-- name: Staged PHP Mitigation Playbook
+- name: Staged PHP Mitigation Playbook (Universal)
   hosts: all
   become: yes
   tasks:
@@ -43,17 +43,22 @@
       loop: "{{ php_ini_matches.files }}"
       when: php_ini_matches.matched > 0
 
-    - name: Restart active PHP-FPM services
-      service:
-        name: "{{ item | regex_replace('\\.service$', '') }}"
-        state: restarted
-      loop: "{{ ansible_facts.services.keys() | select('match', '^php.*-fpm(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
-      when: item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
+    # --- SERVICE RESTART / RELOAD LOGIC ---
 
-    - name: Restart active web servers (Apache / Nginx)
+    - name: Restart running PHP-FPM services (if any exist and are running)
       service:
         name: "{{ item }}"
         state: restarted
+      loop: "{{ ansible_facts.services.keys() | select('match', '^php.*-fpm(\\.service)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
+      when: 
+        - item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
+        - (ansible_facts.services[item].state | default('')) == 'running' or 
+          (ansible_facts.services[item ~ '.service'].state | default('')) == 'running'
+
+    - name: Reload running web servers (Apache / Nginx) to apply php.ini / mod_php changes
+      service:
+        name: "{{ item }}"
+        state: reloaded
       loop:
         - apache2
         - httpd

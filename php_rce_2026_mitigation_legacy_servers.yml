@@ -1,5 +1,5 @@
 ---
-- name: Category A Legacy PHP Emergency Mitigation
+- name: Category A Legacy PHP Emergency Mitigation (Hardened)
   hosts: category_a
   become: yes
   tasks:
@@ -10,9 +10,7 @@
     - name: Find all php.ini files dynamically
       find:
         paths:
-          - /etc/php
-          - /etc/php.ini
-          - /etc/php.d
+          - /etc
         patterns: "php.ini"
         recurse: yes
       register: php_ini_matches
@@ -56,24 +54,30 @@
       loop: "{{ php_ini_matches.files }}"
       when: php_ini_matches.matched > 0
 
-    - name: Restart active PHP-FPM services
-      service:
-        name: "{{ item | regex_replace('\\.service$', '') }}"
-        state: restarted
-      loop: "{{ ansible_facts.services.keys() | select('match', '^(php.*-fpm|php-fpm)(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
-      when: item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
+    # --- SERVICE RESTART / RELOAD LOGIC ---
 
-    - name: Restart active web servers (Apache / Httpd / Nginx)
+    - name: Restart running PHP-FPM services
       service:
         name: "{{ item }}"
         state: restarted
+      loop: "{{ ansible_facts.services.keys() | select('match', '^(php.*-fpm|php-fpm)(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
+      when: 
+        - item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
+        - (ansible_facts.services[item].state | default('')) == 'running' or 
+          (ansible_facts.services[item ~ '.service'].state | default('')) == 'running'
+      ignore_errors: yes
+
+    - name: Reload web servers to apply php.ini / mod_php changes
+      service:
+        name: "{{ item }}"
+        state: reloaded
       loop:
         - apache2
         - httpd
         - nginx
       when: >
-        (item in ansible_facts.services and ansible_facts.services[item].state == 'running') or
-        ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state == 'running')
+        (item in ansible_facts.services and ansible_facts.services[item].state | default('') == 'running') or
+        ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state | default('') == 'running')
       ignore_errors: yes
 
     # --- VERIFICATION TASKS ---
