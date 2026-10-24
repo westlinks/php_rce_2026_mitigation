@@ -1,107 +1,211 @@
 ---
-- name: Category A Legacy PHP Emergency Mitigation (Hardened)
+- name: Category A Legacy PHP Emergency Mitigation and Permission Hardening
   hosts: category_a
-  become: yes
-  tasks:
+  become: true
+  vars:
+    fpm_user: jenkins
+    fpm_group: www-data
 
+  tasks:
     - name: Gather service facts
-      service_facts:
+      ansible.builtin.service_facts:
+
+    # =========================================================================
+    # PHP INI DISCOVERY & SECURITY MITIGATIONS
+    # =========================================================================
 
     - name: Find all php.ini files dynamically
-      find:
+      ansible.builtin.find:
         paths:
           - /etc
         patterns: "php.ini"
-        recurse: yes
+        recurse: true
       register: php_ini_matches
 
     - name: Backup php.ini files before applying changes
-      copy:
+      ansible.builtin.copy:
         src: "{{ item.path }}"
         dest: "{{ item.path }}.bak_{{ ansible_date_time.date }}"
-        remote_src: yes
-        force: no
+        remote_src: true
+        force: false
+        mode: preserve
       loop: "{{ php_ini_matches.files }}"
       when: php_ini_matches.matched > 0
 
-    - name: Disable session.upload_progress.enabled (CVE-2026-109619)
-      ini_file:
+    - name: Disable session.upload_progress.enabled
+      community.general.ini_file:
         path: "{{ item.path }}"
         section: PHP
         option: session.upload_progress.enabled
         value: "0"
-        no_extra_spaces: yes
+        no_extra_spaces: true
+        mode: "0644"
       loop: "{{ php_ini_matches.files }}"
       when: php_ini_matches.matched > 0
 
-    - name: Set memory_limit = -1 (CVE-2026-109618)
-      ini_file:
+    - name: Set memory_limit = -1
+      community.general.ini_file:
         path: "{{ item.path }}"
         section: PHP
         option: memory_limit
         value: "-1"
-        no_extra_spaces: yes
+        no_extra_spaces: true
+        mode: "0644"
       loop: "{{ php_ini_matches.files }}"
       when: php_ini_matches.matched > 0
 
-    - name: Set post_max_size = 32M (Limit request body size)
-      ini_file:
+    # =========================================================================
+    # PHP-FPM POOL PERMISSIONS (PREVENT FTP/MEDIA UPLOAD PERMISSION BREAKAGE)
+    # =========================================================================
+
+    - name: Find legacy and standard PHP-FPM pool configs
+      ansible.builtin.find:
+        paths:
+          - /etc/php
+          - /etc/php5
+          - /etc/php-fpm.d
+        patterns:
+          - "www.conf"
+          - "*.conf"
+        recurse: true
+      register: legacy_fpm_pools
+
+    - name: Align legacy PHP-FPM pool user to jenkins
+      community.general.ini_file:
         path: "{{ item.path }}"
-        section: PHP
-        option: post_max_size
-        value: "32M"
-        no_extra_spaces: yes
-      loop: "{{ php_ini_matches.files }}"
-      when: php_ini_matches.matched > 0
+        section: www
+        option: user
+        value: "{{ fpm_user }}"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ legacy_fpm_pools.files }}"
+      when: legacy_fpm_pools.matched > 0
 
-    # --- SERVICE RESTART / RELOAD LOGIC ---
+    - name: Align legacy PHP-FPM pool group to www-data
+      community.general.ini_file:
+        path: "{{ item.path }}"
+        section: www
+        option: group
+        value: "{{ fpm_group }}"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ legacy_fpm_pools.files }}"
+      when: legacy_fpm_pools.matched > 0
+
+    - name: Ensure PHP-FPM listen socket owner is jenkins
+      community.general.ini_file:
+        path: "{{ item.path }}"
+        section: www
+        option: listen.owner
+        value: "{{ fpm_user }}"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ legacy_fpm_pools.files }}"
+      when: legacy_fpm_pools.matched > 0
+
+    - name: Ensure PHP-FPM listen socket group is www-data
+      community.general.ini_file:
+        path: "{{ item.path }}"
+        section: www
+        option: listen.group
+        value: "{{ fpm_group }}"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ legacy_fpm_pools.files }}"
+      when: legacy_fpm_pools.matched > 0
+
+    - name: Ensure PHP-FPM listen socket mode is 0660
+      community.general.ini_file:
+        path: "{{ item.path }}"
+        section: www
+        option: listen.mode
+        value: "0660"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ legacy_fpm_pools.files }}"
+      when: legacy_fpm_pools.matched > 0
+
+    # =========================================================================
+    # WORDPRESS SPECIFIC FIXES (APPLIES IF WP-CONFIG IS FOUND)
+    # =========================================================================
+
+    - name: Locate wp-config.php files on legacy hosts
+      ansible.builtin.find:
+        paths:
+          - /var/www
+        patterns: "wp-config.php"
+        recurse: true
+        depth: 4
+      register: wp_configs
+
+    - name: Ensure FS_METHOD direct is active on legacy WordPress sites
+      ansible.builtin.lineinfile:
+        path: "{{ item.path }}"
+        line: "define('FS_METHOD', 'direct');"
+        insertafter: "^<\\?php"
+        state: present
+        mode: "0640"
+      loop: "{{ wp_configs.files }}"
+      when: wp_configs.matched > 0
+
+    # =========================================================================
+    # SERVICE RESTART & RELOAD
+    # =========================================================================
 
     - name: Restart running PHP-FPM services
-      service:
+      ansible.builtin.service:
         name: "{{ item }}"
         state: restarted
-      loop: "{{ ansible_facts.services.keys() | select('match', '^(php.*-fpm|php-fpm)(\\..*)?$') | map('regex_replace', '\\.service$', '') | unique | list }}"
-      when: 
-        - item in ansible_facts.services or (item ~ '.service') in ansible_facts.services
-        - (ansible_facts.services[item].state | default('')) == 'running' or 
-          (ansible_facts.services[item ~ '.service'].state | default('')) == 'running'
-      ignore_errors: yes
+      loop: >-
+        {{
+          ansible_facts.services.keys()
+          | select('match', '^(php.*-fpm|php-fpm)(\\..*)?$')
+          | map('regex_replace', '\\.service$', '')
+          | unique
+          | list
+        }}
+      when:
+        - (item in ansible_facts.services and ansible_facts.services[item].state | default('') == 'running') or
+          ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state | default('') == 'running')
+      failed_when: false
 
-    - name: Reload web servers to apply php.ini / mod_php changes
-      service:
+    - name: Reload web servers
+      ansible.builtin.service:
         name: "{{ item }}"
         state: reloaded
       loop:
         - apache2
         - httpd
         - nginx
-      when: >
-        (item in ansible_facts.services and ansible_facts.services[item].state | default('') == 'running') or
-        ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state | default('') == 'running')
-      ignore_errors: yes
+      when:
+        - (item in ansible_facts.services and ansible_facts.services[item].state | default('') == 'running') or
+          ((item ~ '.service') in ansible_facts.services and ansible_facts.services[item ~ '.service'].state | default('') == 'running')
+      failed_when: false
 
-    # --- VERIFICATION TASKS ---
+    # =========================================================================
+    # VERIFICATION
+    # =========================================================================
 
     - name: Verify PHP runtime INI settings
-      command: >
+      ansible.builtin.command: >
         php -r 'echo "memory_limit: " . ini_get("memory_limit") . " | upload_progress: " . ini_get("session.upload_progress.enabled") . "\n";'
       register: php_ini_verify
       changed_when: false
-      ignore_errors: yes
+      failed_when: false
 
     - name: Display PHP INI verification results
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} -> {{ php_ini_verify.stdout | default('PHP CLI not present') }}"
 
     - name: Verify HTTP health via curl
       delegate_to: localhost
-      become: no
-      command: >
+      become: false
+      ansible.builtin.command: >
         curl -sLk -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://{{ ansible_host }}"
       register: http_check
       changed_when: false
-      ignore_errors: yes
+      failed_when: false
 
     - name: Display HTTP verification results
-      debug:
+      ansible.builtin.debug:
         msg: "{{ inventory_hostname }} ({{ ansible_host }}) -> HTTP Status: {{ http_check.stdout | default('Connection failed') }}"
